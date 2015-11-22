@@ -7,31 +7,20 @@
 //  R. Bohne 29.01.2013: changed pin mapping to Watterott FabScan Arduino Shield
 //  R. Bohne 30.12.2013: added pin definitions for stepper 4 --> this firmware supports the new FabScan Shield V1.1, minor syntax changes. Steppers are now disabled at startup.
 //  R. Bohne 12.03.2014: renamed the pins 14..19 to A0..A5 (better abstraction for people who use Arduino MEGA, etc.)
+//  P. Zahradnik 22.11.2015: rewriten to work with Adafruit Motor Shield v1.0
+
+#include <AFMotor.h>
 
 #define LIGHT_PIN A3
-#define LASER_PIN A4
-#define MS_PIN    A5
 
-//Stepper 1 as labeled on Shield, Turntable
-#define ENABLE_PIN_0  2
-#define STEP_PIN_0    3
-#define DIR_PIN_0     4
+//Turntable
+#define TURNTABLE_STEPS_PER_REVOLUTION	96
+#define TURNTABLE_STEPPER_PORT	2
+#define TURNTABLE_RPM		1
 
-//Stepper 2, Laser Stepper
-#define ENABLE_PIN_1  5
-#define STEP_PIN_1    6
-#define DIR_PIN_1     7
+//Laser
+#define LASER_DCMOTOR_PORT	2
 
-//Stepper 3, currently unused
-#define ENABLE_PIN_2  11
-#define STEP_PIN_2    12
-#define DIR_PIN_2     13
-
-//Stepper 4, currently unused
-#define ENABLE_PIN_3  A0
-#define STEP_PIN_3    A1
-#define DIR_PIN_3     A2
-  
 #define TURN_LASER_OFF      200
 #define TURN_LASER_ON       201
 #define PERFORM_STEP        202
@@ -64,22 +53,20 @@ int incomingByte = 0;
 int byteType = 1;
 int currStepper;
 
+AF_Stepper turntable(TURNTABLE_STEPS_PER_REVOLUTION, TURNTABLE_STEPPER_PORT);
+AF_DCMotor   laser(LASER_DCMOTOR_PORT);
+uint8_t    turntable_direction = FORWARD;
+
 
 //current motor: turn a single step 
 void step()
 {
  if(currStepper == TURNTABLE_STEPPER){
-   digitalWrite(STEP_PIN_0, LOW);
+   turntable.onestep(turntable_direction, MICROSTEP);
  }else if(currStepper == LASER_STEPPER){
-   digitalWrite(STEP_PIN_1, LOW);
+   // Not implemented
  }
 
- delay(3);
- if(currStepper == TURNTABLE_STEPPER){
-   digitalWrite(STEP_PIN_0, HIGH);
- }else if(currStepper == LASER_STEPPER){
-   digitalWrite(STEP_PIN_1, HIGH);
- }
  delay(3);
 }
 
@@ -91,44 +78,32 @@ void step(int count)
   }
 }
 
+void laser_on()
+{
+  laser.setSpeed(255);
+}
+
+void laser_off()
+{
+  laser.setSpeed(0);
+}
+
 void setup() 
 { 
   // initialize the serial port
    Serial.begin(9600);
-   pinMode(LASER_PIN, OUTPUT);
    pinMode(LIGHT_PIN, OUTPUT);
- 
-   pinMode(MS_PIN, OUTPUT);
-   digitalWrite(MS_PIN, HIGH);  //HIGH for 16microstepping, LOW for no microstepping
 
-  pinMode(ENABLE_PIN_0, OUTPUT);
-  pinMode(DIR_PIN_0, OUTPUT);
-  pinMode(STEP_PIN_0, OUTPUT);
+   turntable.setSpeed(TURNTABLE_RPM);
 
-  pinMode(ENABLE_PIN_1, OUTPUT);
-  pinMode(DIR_PIN_1, OUTPUT);
-  pinMode(STEP_PIN_1, OUTPUT);
+   laser.run(FORWARD);
+   laser_on();
  
-  pinMode(ENABLE_PIN_2, OUTPUT);
-  pinMode(DIR_PIN_2, OUTPUT);
-  pinMode(STEP_PIN_2, OUTPUT);
+   digitalWrite(LIGHT_PIN, LOW); //turn light off
 
-  pinMode(ENABLE_PIN_3, OUTPUT);
-  pinMode(DIR_PIN_3, OUTPUT);
-  pinMode(STEP_PIN_3, OUTPUT);
+   Serial.write(FABSCAN_PONG); //send a pong back to the computer so we know setup is done and that we are actually dealing with a FabScan
  
- //disable all steppers at startup
- digitalWrite(ENABLE_PIN_0, HIGH);  //HIGH to turn off
- digitalWrite(ENABLE_PIN_1, HIGH);  //HIGH to turn off
- digitalWrite(ENABLE_PIN_2, HIGH);  //LOW to turn on
- digitalWrite(ENABLE_PIN_3, HIGH);  //LOW to turn on 
- 
- digitalWrite(LIGHT_PIN, LOW); //turn light off
-
- digitalWrite(LASER_PIN, HIGH); //turn laser on
- Serial.write(FABSCAN_PONG); //send a pong back to the computer so we know setup is done and that we are actually dealing with a FabScan
- 
- currStepper = TURNTABLE_STEPPER;  //turntable is default stepper
+   currStepper = TURNTABLE_STEPPER;  //turntable is default stepper
 } 
 
 void loop() 
@@ -144,10 +119,10 @@ void loop()
           switch(incomingByte){    //this switch always handles the first byte
             //Laser
             case TURN_LASER_OFF:
-              digitalWrite(LASER_PIN, LOW);    // turn the LASER off
+              laser_off();    // turn the LASER off
               break;
             case TURN_LASER_ON:
-              digitalWrite(LASER_PIN, HIGH);   // turn the LASER on
+              laser_on();   // turn the LASER on
               break;
             case ROTATE_LASER: //unused
               byteType = LASER_ROTATION;
@@ -158,30 +133,30 @@ void loop()
               break;
             case SET_DIRECTION_CW:
               if(currStepper == TURNTABLE_STEPPER){
-                digitalWrite(DIR_PIN_0, HIGH);
+                turntable_direction=FORWARD;
               }else if(currStepper == LASER_STEPPER){
-                digitalWrite(DIR_PIN_1, HIGH);
+                // Not implemented
               }
               break;
             case SET_DIRECTION_CCW:
               if(currStepper == TURNTABLE_STEPPER){
-                digitalWrite(DIR_PIN_0, LOW);
+		turntable_direction=BACKWARD;
               }else if(currStepper == LASER_STEPPER){
-                digitalWrite(DIR_PIN_1, LOW);
+                // Not implemented
               }
               break;
             case TURN_STEPPER_ON:
               if(currStepper == TURNTABLE_STEPPER){
-                digitalWrite(ENABLE_PIN_0, LOW);
+                turntable.setSpeed(TURNTABLE_RPM);
               }else if(currStepper == LASER_STEPPER){
-                digitalWrite(ENABLE_PIN_1, LOW);
+                // Not implemented
               }
               break;
             case TURN_STEPPER_OFF:
               if(currStepper == TURNTABLE_STEPPER){
-                digitalWrite(ENABLE_PIN_0, HIGH);
+                turntable.release();
               }else if(currStepper == LASER_STEPPER){
-                digitalWrite(ENABLE_PIN_1, HIGH);
+                // Not implemented
               }
               break;
             case TURN_LIGHT_ON:
